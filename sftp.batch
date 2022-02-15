@@ -1,0 +1,8 @@
+mkdir Containers
+mkdir Containers/sftp-only
+cd Containers/sftp-only
+put Dockerfile
+put entrypoint.sh
+put containeradm
+put ssh-functions.sh
+put ssh-key.sh

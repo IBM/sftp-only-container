@@ -1,0 +1,323 @@
+#!/bin/bash
+# Under Apache 2.0 License see LICENSE file.
+#
+# Copyright IBM 2021,2022
+# SPDX-License-Identifier: Apache2.0
+#
+# Authors:
+#  - Thomas Weinzettl <thomasw@ae.ibm.com>
+#
+#===============================================================================
+
+# We need to set DEBUG to 0 if it is not set in order to get the debug level
+# right.
+[ -z $DEBUG ] && DEBUG=0 || [ $DEBUG -ge 1 ] && echo "Container: Debug level=${DEBUG}"
+
+
+# This shell script is helps to administer the container users as well as the
+# ssh keys of the user and the host.
+#
+source /bin/ssh-functions.sh
+
+######
+# This function will print all possible users with their uid:gid settings
+# the container is aware of in `id` format.
+#
+list_users() {
+  users=`ls /home/`
+  for user in $users ; do
+    if [ -d /home/${user} ]; then
+      # the `id` command helps us to print out the groups and ids
+      id ${user}
+    fi
+  done
+}
+
+######
+# This function adds a ssh-key to a users authorized_keys file. It is split in two
+# for security reasons. The acual add is executed with as the user whos key is to
+# be added.
+#
+# We only parse the parameters, the format is "username:sshkey"
+#
+add_key(){
+  IFS=":" read -r user key <<< "$@"
+  [ $DEBUG -ge 1 ] && echo "Container: DEBUG > add_key for user=${user} with key=${key:0:24}..."
+
+  #
+  # We call here `sudo` as the user to add the key, to avoid any permission bit, or
+  # ownership issues.
+  sudo -E -u $user ssh-key.sh add $key
+}
+
+######
+# This function lists the keys installed for one user
+# $1 .. is the user name.
+#
+list_keys(){
+  user=$1
+  echo "Container: list keys for ${user}"
+
+  #
+  # To avoid permission or ownership issues we call the list script as the user
+  sudo -E -u ${user} ssh-key.sh list
+}
+
+######
+# This functions adds a new user to the container. It requires a username as parameter.
+# Optionally uid and gid can be specified.
+#
+add_user() {
+  IFS=":" read -r user uid gid <<<$@
+
+  [ -z "$uid" ] && uid_cmd="" || uid_cmd="-u ${uid}"
+
+  if [ -z "$gid" ]; then
+    gid_cmd=""
+  else
+    gid_cmd="-g ${gid}"
+    groupadd -g $gid $user
+  fi
+
+  # -m needed to ensure we have the home-dir
+  useradd -m $uid_cmd $gid_cmd $user
+  echo "User $user was added."
+}
+
+######
+# This functions adds a new group to the data. It requires a group name as
+# parameter. Optionally a gid can be specified.
+#
+add_group() {
+  IFS=":" read -r group gid <<<$@
+
+  [ -z "$gid" ] && gid_cmd="" || gid_cmd="-g ${gid}"
+
+  groupadd $gid_cmd $group
+
+  echo "Group $group was added."
+}
+
+
+######
+# remove a user from a group
+#
+remove_from_group() {
+  IFS=" " read -r user group force <<< "$@"
+  [ $DEBUG -ge 1 ] && echo "Container: DEBUG > add_to_group user=${user},group=${group}"
+
+  [ "$user" == "$group" ] && {
+    echo "Error: cannot remove primary group"
+    return
+  }
+
+  if [ -f /home/${user}/.groups.d/${group} ]; then
+    rm /home/${user}/.groups.d/${group}
+    gpasswd -d $user $group
+  fi
+}
+
+######
+# This function checks if a group exists
+#
+group_is_existing(){
+  IFS=" " read -r group trash <<<$@
+  result=0
+
+  [ -z "$group" ] || {
+    getent group $group >/dev/null && result=1
+  }
+
+  return $result
+}
+
+######
+# This function adds a user to a group. It stores the group associations in
+# $HOME/.groups.d/${groupname} by owning it by the user.
+#
+add_to_group() {
+  IFS=" " read -r user group <<< "$@"
+  [ $DEBUG -ge 1 ] && echo "Container: DEBUG > add_to_group user=${user},group=${group}"
+
+  # We need to have an .groups.d directoy inside $HOME
+  if [ ! -d /home/${user}/.groups.d ]; then
+    sudo -u $user mkdir -p /home/${user}/.groups.d
+    sudo -u $user chmod 700 /home/${user}/.groups.d
+  fi
+
+  group_is_existing $group
+  isexisting=$?
+
+  [ $isexisting == 1 ] && {
+    gpasswd -a ${user} ${group}
+    sudo -u ${user} -g ${group} touch /home/${user}/.groups.d/${group}
+    sudo -u ${user} -g ${group} chmod 400 /home/${user}/.groups.d/${group}
+  }  || {
+    echo "Group $group does not exist."
+  }
+
+}
+
+######
+# This function removes users
+#
+del_user(){
+  IFS=" " read -r user <<<$@
+
+  userdel ${user}
+
+  if [ -d /home/$user ]; then
+    rm -Rf /home/${user}
+  fi
+
+  echo "User $user was deleted."
+}
+
+######
+# This function regenerates the hostkeys.
+#
+hostkey_refresh(){
+  rm -r /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+  ssh-keygen -A
+  store
+}
+
+#####
+# Print usage info
+#
+usage(){
+  echo "containeradm ... usage"
+  echo ""
+  echo "# containeradm [object] [command] [parameter]"
+  echo ""
+  echo "Objects:"
+  echo " - user ....... to work with users."
+  echo " - group ...... to work with groups."
+  echo " - key ........ to work with public ssh keys."
+  echo " - hostkey .... to work with host keys."
+  echo " - showconfig . to show the current sshd_config"
+}
+
+#####
+# Print Usage info for user subcommand
+usage_user(){
+  echo ""
+  echo "Commands:"
+  echo " - list ..... to list users"
+  echo "           no parameters"
+  echo " - add ...... to add a user"
+  echo "           parameters: USERNAME[:[UID]:[GID]])"
+  echo " - del ...... to delete a user"
+  echo "           parameters: USERNAME"
+  echo " - addgrp ... add to group"
+  echo "           parameters: USERNAME GROUPNAME"
+  echo " - rmgrp .... remove from a group"
+  echo "           parameters: USERNAME GROUPNAME"
+}
+
+######
+# Print usage for key subcommand
+#
+usage_key(){
+  echo ""
+  echo "Commands:"
+  echo " - list ..... to list a users key"
+  echo "           parameters: USERNAME"
+  echo " - add ...... to add a key to a user"
+  echo "           parameters: USERNAME:PUBLIC-SSH-KEY"
+}
+
+######
+# Print usage for hostkey subcommand
+usage_hostkey() {
+  echo ""
+  echo "Commands:"
+  echo " - refresh .. generates new host keys"
+}
+
+######
+# Print usage for adding grouops
+usage_group() {
+  echo ""
+  echo "Commands:"
+  echo " - add .... GROUPNAME[:GID] to add a group"
+}
+
+################################################################################
+# main
+
+# Lets get the arguments and load them into our variables
+read -r object command parameters <<<$@
+
+#TODO: switch to case (replacing if)
+case "$object" in
+  "user")
+    case "$command" in
+      "list")
+        list_users
+      ;;
+
+      "add")
+        add_user ${parameters}
+      ;;
+
+      "del")
+        del_user ${parameters}
+      ;;
+
+      "addgrp")
+        add_to_group ${parameters}
+      ;;
+
+      "rmgrp")
+        remove_from_group ${parameters}
+      ;;
+
+      *|"help")
+        usage
+        usage_user
+      ;;
+    esac
+  ;;
+
+  "group")
+    case "$command" in
+      "add")
+        add_group ${parameters}
+      ;;
+
+      *|"help")
+        usage
+        usage_group
+      ;;
+    esac
+  ;;
+
+  "key")
+    if [[ -z "$command" || "$command" == "help" ]]; then
+      usage
+      usage_key
+    elif [ "$command" == "list" ]; then
+      list_keys $parameters
+    elif [ "$command" == "add" ]; then
+      add_key $parameters
+    fi
+  ;;
+
+  "hostkey")
+    if [[ -z "$command" || "$command" == "help" ]]; then
+      usage
+      usage_hostkey
+    elif [ "$command" == "refresh" ]; then
+      hostkey_refresh
+    fi
+  ;;
+
+  "showconfig")
+    cat /etc/sshd/config
+  ;;
+
+  *|"help")
+    usage
+  ;;
+esac
