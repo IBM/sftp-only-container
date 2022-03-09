@@ -16,7 +16,8 @@ container for IBM zCX (or any other appliance-like container runtime).
 
 ### Requirements
 
-- IBM Z Container Extension (zCX) or other remote container runtime (docker or podman) e.g. podman machines on MacOS
+- IBM Z Container Extension (zCX) - FMID HZDC7C0 - see [z/OS 2.5 Requirements for zCX](https://www.ibm.com/docs/en/zos/2.5.0?topic=zcx-requirements) or
+- other remote container runtime (docker or podman) e.g. podman machines on MacOS
 - volume for `/home` to contain _authorized_keys_ for ssh public key
 authentication
 - volume for `/Volume` to host the hub of container volumes to mount onto
