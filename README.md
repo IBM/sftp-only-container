@@ -10,7 +10,7 @@
 container files and shell scripts for the IBM Developer tutorial sftp-only
 container for IBM zCX (or any other appliance-like container runtime).
 
-*TODO* add link to public site, once published.
+[Share volumes from the IBM z/OS Container Extension using SFTP on IBM Developer](https://developer.ibm.com/tutorials/sharing-volumes-from-the-ibm-zos-container-extension-using-sftp-or-scp/)
 
 ## Usage - Start the container
 
