@@ -7,7 +7,9 @@
 <!-- Not always needed, but a scope helps the user understand in a short sentance like below, why this repo exists -->
 ## Scope
 
-container files and shell scripts for the IBM Developer tutorial sftp-only
+**Note:** Fix for [#3] will require the build on docker to add the parameter `-f Containerfile` and is only automaticaly working on podman.
+
+Container files and shell scripts for the IBM Developer tutorial sftp-only
 container for IBM zCX (or any other appliance-like container runtime).
 
 [Share volumes from the IBM z/OS Container Extension using SFTP on IBM Developer](https://developer.ibm.com/tutorials/sharing-volumes-from-the-ibm-zos-container-extension-using-sftp-or-scp/)
